@@ -3,6 +3,10 @@ package com.example.deviceinfoapp
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
@@ -11,21 +15,67 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.telephony.TelephonyManager
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import android.widget.TextView
+import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import kotlin.math.round
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var textView: TextView
+    private lateinit var sensorManager: SensorManager
+    private lateinit var list: List<Sensor>
+
+    @RequiresApi(Build.VERSION_CODES.M)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        findViewById<TextView>(R.id.displayInfo).text = getSystemDetails()
+        textView = findViewById(R.id.displayInfo)
+        textView.text = getSystemDetails()
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        textView = findViewById(R.id.displayInfo)
+
+        list = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER)
+        if (list.isNotEmpty()) {
+            sensorManager.registerListener(sel, list[0], SensorManager.SENSOR_DELAY_NORMAL)
+        } else {
+            Toast.makeText(baseContext, "Error: No Accelerometer.", Toast.LENGTH_LONG).show()
+        }
 
     }
 
+    var sel: SensorEventListener = object : SensorEventListener {
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+
+        @SuppressLint("SetTextI18n")
+        override fun onSensorChanged(event: SensorEvent) {
+            val values = event.values
+            val sensor = """
+            x: ${values[0]}
+            y: ${values[1]}
+            z: ${values[2]}
+            """.trimIndent()
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    textView.text = getSystemDetails() + sensor
+                }
+            } catch (e: CameraAccessException) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Camera Access Exception Occurred",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.M)
     @SuppressLint("HardwareIds")
     private fun getSystemDetails() : String {
         return "Manufacture: ${Build.MANUFACTURER} \n" +
@@ -36,12 +86,9 @@ class MainActivity : AppCompatActivity() {
                 "Version Code: ${Build.VERSION.RELEASE}\n" +
                 "Incremental: ${Build.VERSION.INCREMENTAL} \n" +
                 getCamerasMegaPixel() +
+                getScreenResolution(this) +
                 "SDK: ${Build.VERSION.SDK_INT} \n" +
 //                getIMEI() +
-                cpuInfo() +
-                gpuInfo() +
-                getCameraAperture() +
-                sensorReading() +
                 "\nDeviceID: ${Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)} \n" +
                 "ID: ${Build.ID} \n" +
                 "User: ${Build.USER} \n" +
@@ -49,7 +96,23 @@ class MainActivity : AppCompatActivity() {
                 "Base: ${Build.VERSION_CODES.BASE} \n" +
                 "Board: ${Build.BOARD} \n" +
                 "Host: ${Build.HOST} \n" +
-                "FingerPrint: ${Build.FINGERPRINT} \n"
+                "FingerPrint: ${Build.FINGERPRINT} \n" +
+                "Display: ${Build.DISPLAY} \n" +
+                "CPU ABI: ${ Build.CPU_ABI } \n" +
+                "Radio Version: ${Build.getRadioVersion() } \n" +
+                "BootLoader: ${ Build.BOOTLOADER } \n" +
+                "Hardware: ${ Build.HARDWARE } \n" +
+                "Product: ${Build.PRODUCT} \n"
+    }
+
+    private fun getScreenResolution(context: Context): String {
+        val wm = context.getSystemService(WINDOW_SERVICE) as WindowManager
+        val display = wm.defaultDisplay
+        val metrics = DisplayMetrics()
+        display.getMetrics(metrics)
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
+        return "Screen Resolution: $width x $height pixels \n"
     }
 
     private fun getIMEI() : String {
@@ -59,22 +122,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             return ""
         }
-    }
-
-    private fun getCameraAperture() : String{
-        return "Camera Aperture: \n"
-    }
-
-    private fun cpuInfo() : String {
-        return "CPU Info: \n"
-    }
-
-    private fun gpuInfo() : String {
-        return "GPU Info: \n"
-    }
-
-    private fun sensorReading() : String {
-        return "Sensor Reading: \n"
     }
 
     @Throws(CameraAccessException::class)
@@ -110,12 +157,17 @@ class MainActivity : AppCompatActivity() {
         val availMemory = round( memInfo.availMem.toDouble()/(1024*1024*1024))
         val totalMemory= round( memInfo.totalMem.toDouble()/(1024*1024*1024))
 
-        return "Available RAM: $availMemory\nTotal RAM: $totalMemory \n"
+        return "Available RAM: $availMemory\nTotal RAM: $totalMemory \nIs device low on RAM: ${actManager.isLowRamDevice}"
     }
 
+    @RequiresApi(Build.VERSION_CODES.M)
     private fun getBatteryInfo() : String {
         val batLevel = this.getSystemService(BATTERY_SERVICE) as BatteryManager
-        return "Battery: ${batLevel.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)} \n"
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            "Battery: ${batLevel.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)} \nIs device in charging: ${batLevel.isCharging} \nTime remaining for charging: ${batLevel.computeChargeTimeRemaining() / 1000 / 60} minutes\n"
+        } else {
+            "Battery: ${batLevel.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)} \nIs device in charging: ${batLevel.isCharging} \n"
+        }
     }
 
 }
